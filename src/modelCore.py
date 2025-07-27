@@ -14,17 +14,14 @@ from keras.models import Model
 from keras.initializers import Constant
 from keras.constraints import Constraint
 from keras import backend as K
-from keras.layers.convolutional import _Conv
-from keras.legacy import interfaces
-from keras.engine import InputSpec
+from keras.layers import InputSpec
 import tensorflow as tf
 import numpy as np 
 
 #################################################################################
 # Model Utils for Image Manipulation Classification
 #################################################################################
-class Conv2DSymPadding( _Conv ) :
-    @interfaces.legacy_conv2d_support
+class Conv2DSymPadding(Conv2D):
     def __init__(self, filters,
                  kernel_size,
                  strides=(1, 1),
@@ -41,8 +38,7 @@ class Conv2DSymPadding( _Conv ) :
                  kernel_constraint=None,
                  bias_constraint=None,
                  **kwargs):
-        super(Conv2DSymPadding, self).__init__(
-            rank=2,
+        super().__init__(
             filters=filters,
             kernel_size=kernel_size,
             strides=strides,
@@ -61,8 +57,7 @@ class Conv2DSymPadding( _Conv ) :
             **kwargs)
         self.input_spec = InputSpec(ndim=4)
     def get_config(self):
-        config = super(Conv2DSymPadding, self).get_config()
-        config.pop('rank')
+        config = super().get_config()
         return config
     def call( self, inputs ) :
         if ( isinstance( self.kernel_size, tuple ) ) :
@@ -71,18 +66,17 @@ class Conv2DSymPadding( _Conv ) :
             kh = kw = self.kernel_size
         ph, pw = kh//2, kw//2
         inputs_pad = tf.pad( inputs, [[0,0],[ph,ph],[pw,pw],[0,0]], mode='symmetric' )
-        outputs = K.conv2d(
-                inputs_pad,
-                self.kernel,
-                strides=self.strides,
-                padding='valid',
-                data_format=self.data_format,
-                dilation_rate=self.dilation_rate)
+        df = 'NHWC' if self.data_format in [None, 'channels_last'] else 'NCHW'
+        outputs = tf.nn.conv2d(
+            inputs_pad,
+            self.kernel,
+            strides=(1, *self.strides, 1),
+            padding='VALID',
+            data_format=df,
+            dilations=self.dilation_rate,
+        )
         if self.use_bias:
-            outputs = K.bias_add(
-                outputs,
-                self.bias,
-                data_format=self.data_format)
+            outputs = tf.nn.bias_add(outputs, self.bias, data_format=df)
 
         if self.activation is not None:
             return self.activation(outputs)
@@ -95,13 +89,13 @@ class BayarConstraint( Constraint ) :
         nb_rows, nb_cols, nb_inputs, nb_outputs = K.int_shape(w)
         m = np.zeros([nb_rows, nb_cols, nb_inputs, nb_outputs]).astype('float32')
         m[nb_rows//2,nb_cols//2] = 1.
-        self.mask = K.variable( m, dtype='float32' )
+        self.mask = tf.Variable(m, dtype='float32')
         return
     def __call__( self, w ) :
         if self.mask is None :
             self._initialize_mask(w)
         w *= (1-self.mask)
-        rest_sum = K.sum( w, axis=(0,1), keepdims=True)
+        rest_sum = tf.reduce_sum(w, axis=(0, 1), keepdims=True)
         w /= rest_sum + K.epsilon()
         w -= self.mask
         return w
@@ -169,7 +163,7 @@ class CombinedConv2D( Conv2DSymPadding ) :
                 this_ch_kernel[:,:,ch] = srm
                 kernel.append( this_ch_kernel )
         kernel = np.stack( kernel, axis=-1 )
-        srm_kernel = K.variable( kernel, dtype='float32', name='srm' )
+        srm_kernel = tf.Variable(kernel, dtype='float32', name='srm')
         return srm_kernel
     def build( self, input_shape ) :
         if self.data_format == 'channels_first':
@@ -208,12 +202,33 @@ class CombinedConv2D( Conv2DSymPadding ) :
         else :
             all_kernels = [ self.srm_kernel,
                             self.bayar_kernel]
-        self.kernel = K.concatenate( all_kernels, axis=-1 )
+        self._kernel = tf.concat(all_kernels, axis=-1)
         # Set input spec.                                                                                                                             
         self.input_spec = InputSpec(ndim=self.rank + 2,
                                     axes={channel_axis: input_dim})
         self.built = True
 
+    def call(self, inputs):
+        if isinstance(self.kernel_size, tuple):
+            kh, kw = self.kernel_size
+        else:
+            kh = kw = self.kernel_size
+        ph, pw = kh // 2, kw // 2
+        inputs_pad = tf.pad(inputs, [[0, 0], [ph, ph], [pw, pw], [0, 0]], mode="symmetric")
+        df = "NHWC" if self.data_format in [None, "channels_last"] else "NCHW"
+        outputs = tf.nn.conv2d(
+            inputs_pad,
+            self._kernel,
+            strides=(1, *self.strides, 1),
+            padding="VALID",
+            data_format=df,
+            dilations=self.dilation_rate,
+        )
+        if self.use_bias:
+            outputs = tf.nn.bias_add(outputs, self.bias, data_format=df)
+        if self.activation is not None:
+            return self.activation(outputs)
+        return outputs
 def create_featex_vgg16_base( type=1 ) :
     base = 32
     img_input = Input(shape=(None,None,3), name='image_in')
@@ -245,11 +260,14 @@ def create_featex_vgg16_base( type=1 ) :
     x = Conv2DSymPadding( nb_filters, (3,3), activation='relu', padding='same',  name=bname+'c2')( x )
     activation=None if type >=1 else 'tanh'
     print ("INFO: use activation in the last CONV={}".format( activation ))
-    sf = Conv2DSymPadding( nb_filters, (3,3),
-                           activation=activation,
-                          name='transform',
-                          padding='same' )(x)
-    sf = Lambda( lambda t : K.l2_normalize( t, axis=-1), name='L2')(sf)
+    sf = Conv2DSymPadding(
+        nb_filters,
+        (3, 3),
+        activation=activation,
+        name='transform',
+        padding='same',
+    )(x)
+    sf = Lambda(lambda t: tf.math.l2_normalize(t, axis=-1), name='L2')(sf)
     return Model( inputs= img_input, outputs=sf, name='Featex')
 
 class GlobalStd2D( Layer ) :
@@ -268,8 +286,8 @@ class GlobalStd2D( Layer ) :
         self.built = True
         return
     def call( self, x ) :
-        x_std = K.std( x, axis=(1,2), keepdims=True )
-        x_std = K.maximum( x_std, self.min_std_val/10. + self.min_std )
+        x_std = tf.math.reduce_std(x, axis=(1, 2), keepdims=True)
+        x_std = tf.math.maximum(x_std, self.min_std_val / 10.0 + self.min_std)
         return x_std
     def compute_output_shape( self, input_shape ) :
         return (input_shape[0], 1, 1, input_shape[-1] )
@@ -304,9 +322,12 @@ class NestedWindowAverageFeatExtrator( Layer ) :
         self.max_wh, self.max_ww = self._get_max_size()
         return
     def _initialize_ii_buffer( self, x ) :
-        x_pad = K.spatial_2d_padding( x, ((self.max_wh//2+1,self.max_wh//2+1), (self.max_ww//2+1,self.max_ww//2+1)) )
-        ii_x  = K.cumsum( x_pad, axis=1 )
-        ii_x2 = K.cumsum( ii_x, axis=2 )
+        x_pad = tf.pad(
+            x,
+            [[0, 0], [self.max_wh // 2 + 1, self.max_wh // 2 + 1], [self.max_ww // 2 + 1, self.max_ww // 2 + 1], [0, 0]],
+        )
+        ii_x = tf.cumsum(x_pad, axis=1)
+        ii_x2 = tf.cumsum(ii_x, axis=2)
         return ii_x2
     def _get_max_size( self ) :
         mh, mw = 0, 0
@@ -338,7 +359,7 @@ class NestedWindowAverageFeatExtrator( Layer ) :
         Cy0, Cx0 = (bot_0, right_0) #By + height, Bx
         Dy0, Dx0 = (bot_0, left_0) #Cy, Ax
         # used in testing, where each batch is a sample of different shapes
-        counts = K.ones_like( x[:1,...,:1] )
+        counts = tf.ones_like(x[:1, ..., :1])
         count_ii = self._initialize_ii_buffer( counts )
         # compute winsize if necessary
         counts_2d = count_ii[:,Ay:Ay0, Ax:Ax0] \
@@ -369,17 +390,17 @@ class NestedWindowAverageFeatExtrator( Layer ) :
             else :
                 x_win_avgs.append( this_avg )
         # 2. compute corr(x, global_mean)
-        if ( self.include_global ) :
-            if ( self.minus_original ) :
-                mu = K.mean( x, axis=(1,2), keepdims=True )
-                x_win_avgs.append( mu-x )
-            else :
-                mu = K.mean( x, axis=(1,2), keepdims=True ) * K.ones_like(x)
-                x_win_avgs.append( mu )
+        if self.include_global:
+            if self.minus_original:
+                mu = tf.reduce_mean(x, axis=(1, 2), keepdims=True)
+                x_win_avgs.append(mu - x)
+            else:
+                mu = tf.reduce_mean(x, axis=(1, 2), keepdims=True) * tf.ones_like(x)
+                x_win_avgs.append(mu)
         if self.output_mode == '4d' :
-            return K.concatenate( x_win_avgs, axis=-1 )
+            return tf.concat(x_win_avgs, axis=-1)
         elif self.output_mode == '5d' :
-            return K.stack( x_win_avgs, axis=1 )
+            return tf.stack(x_win_avgs, axis=1)
         else :
             raise (NotImplementedError, "ERROR: unknown output_mode={}".format( self.output_mode ))
     def compute_output_shape(self, input_shape):
@@ -389,11 +410,12 @@ class NestedWindowAverageFeatExtrator( Layer ) :
         else :
             return ( batch_size, self.num_woi+int(self.include_global), num_rows, num_cols, num_filts )
 
-def create_manTraNet_model( Featex, pool_size_list=[7,15,31], is_dynamic_shape=True, apply_normalization=True ) :
-    """
-    Create ManTra-Net from a pretrained IMC-Featex model
-    """
-    img_in = Input(shape=(None,None,3), name='img_in' )
+def create_manTraNet_model(
+    Featex, pool_size_list=[7, 15, 31], is_dynamic_shape=True, apply_normalization=True
+):
+    """Create ManTra-Net from a pretrained IMC-Featex model"""
+    input_shape = (None, None, 3) if is_dynamic_shape else (256, 256, 3)
+    img_in = Input(shape=input_shape, name='img_in')
     rf = Featex( img_in )
     rf = Conv2D( 64, (1,1),
                  activation=None, # no need to use tanh if sf is L2normalized
@@ -407,9 +429,17 @@ def create_manTraNet_model( Featex, pool_size_list=[7,15,31], is_dynamic_shape=T
                                              minus_original=True,
                                              name='nestedAvgFeatex' )( bf )
     if ( apply_normalization ) :
-        sigma = GlobalStd2D( name='glbStd' )( bf )
-        sigma5d = Lambda( lambda t : K.expand_dims( t, axis=1 ), name='expTime')( sigma )
-        devf5d = Lambda( lambda vs : K.abs(vs[0]/vs[1]), name='divStd' )([devf5d, sigma5d])
+        sigma = GlobalStd2D(name='glbStd')(bf)
+        sigma5d = Lambda(
+            lambda t: tf.expand_dims(t, axis=1),
+            name='expTime',
+            output_shape=lambda s: (s[0], 1, s[1], s[2], s[3]),
+        )(sigma)
+        devf5d = Lambda(
+            lambda vs: tf.abs(vs[0] / vs[1]),
+            name='divStd',
+            output_shape=lambda shapes: shapes[0],
+        )([devf5d, sigma5d])
     # convert back to 4d
     devf = ConvLSTM2D( 8, (7,7),
                        activation='tanh',
@@ -420,7 +450,7 @@ def create_manTraNet_model( Featex, pool_size_list=[7,15,31], is_dynamic_shape=T
     pred_out = Conv2D(1, (7,7), padding='same', activation='sigmoid', name='pred')( devf )
     return Model( inputs=img_in, outputs=pred_out, name='sigNet' )
 
-def create_model( IMC_model_idx, freeze_featex, window_size_list ) :
+def create_model(IMC_model_idx, freeze_featex, window_size_list, is_dynamic_shape=True):
     type_idx = IMC_model_idx if IMC_model_idx < 4 else 2
     Featex = create_featex_vgg16_base( type_idx )
     if freeze_featex :
@@ -433,18 +463,25 @@ def create_model( IMC_model_idx, freeze_featex, window_size_list ) :
         for ly in Featex.layers[:5] :
             ly.trainable = False
             print ("INFO: freeze", ly.name)
-    model = create_manTraNet_model( Featex,
-                                    pool_size_list=window_size_list,
-                                    is_dynamic_shape=True,
-                                    apply_normalization=True, )
+    model = create_manTraNet_model(
+        Featex,
+        pool_size_list=window_size_list,
+        is_dynamic_shape=is_dynamic_shape,
+        apply_normalization=True,
+    )
     return model
 
-def load_pretrain_model_by_index( pretrain_index, model_dir ) :
+def load_pretrain_model_by_index(pretrain_index, model_dir, is_dynamic_shape=True):
     if ( pretrain_index == 4 ) :
         IMC_model_idx, freeze_featex, window_size_list  = 2, False, [7, 15, 31]
     else :
         IMC_model_idx, freeze_featex, window_size_list  = pretrain_index, False, [7, 15, 31, 63]
-    single_gpu_model = create_model( IMC_model_idx, freeze_featex, window_size_list )
+    single_gpu_model = create_model(
+        IMC_model_idx,
+        freeze_featex,
+        window_size_list,
+        is_dynamic_shape=is_dynamic_shape,
+    )
     weight_file = "{}/ManTraNet_Ptrain{}.h5".format( model_dir, pretrain_index )
     assert os.path.isfile(weight_file), "ERROR: fail to locate the pretrained weight file"
     single_gpu_model.load_weights( weight_file )

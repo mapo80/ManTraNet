@@ -39,11 +39,56 @@ To extend the provided ManTraNet, one may introduce the new manipulation either 
 
 # Dependency
 ManTraNet is written in Keras with the TensorFlow backend.
-  
-  - Keras: 2.2.0
-  - TensorFlow: 1.8.0
-  
-Other versions might also work, but are not tested.
+
+Tested versions:
+
+  - **Python**: 3.12
+  - **Keras**: 3.10
+  - **TensorFlow**: 2.16.1
+
+Earlier versions might still work but are no longer maintained here.
+
+To convert the released weights to ONNX run:
+
+```bash
+pip install tensorflow==2.16.1 keras==3.10.0 tf2onnx
+python convert_to_onnx.py
+```
+
+## ONNX testing
+
+After conversion you can test the exported model with a few sample
+images:
+
+```bash
+pip install onnxruntime opencv-python-headless
+python test_onnx.py
+```
+
+The script reports the mean score for forged and original images and
+also prints how long each inference took. Example output:
+
+```
+Mean forged score: 0.135067
+Mean original score: 0.054929
+Image 1 forged time: 2.0999s, original time: 1.9482s
+Image 2 forged time: 1.8609s, original time: 1.8908s
+Image 3 forged time: 1.8984s, original time: 1.9349s
+```
+
+## .NET CLI
+
+You can also run the ONNX model using a small .NET 8 command line
+application located in the `ManTraNetCLI` directory. Build and execute
+it with:
+
+```bash
+dotnet run -c Release --project ManTraNetCLI
+```
+
+The program loads `pretrained_weights/ManTraNet_Ptrain4.onnx` and runs
+inference on a few sample pairs defined in `data/samplePairs.csv`, then
+prints the mean forged and original scores.
 
 # Demo
 One may simply download the repo and play with the provided ipython notebook. 
