@@ -1,144 +1,132 @@
-# **ManTraNet**: Manipulation Tracing Network For Detection And Localization of Image ForgeriesWith Anomalous Features
-<img src="https://www.isi.edu/images/isi-logo.jpg" width="300"/> <img src="http://cvpr2019.thecvf.com/images/CVPRLogo.png" width="300"/> 
+# ManTraNet: Manipulation Tracing Network for Detection and Localization of Image Forgeries
 
-***
-This is the official repo for the ManTraNet (CVPR2019). For method details, please refer to 
+<img src="https://www.isi.edu/images/isi-logo.jpg" width="300"/> <img src="http://cvpr2019.thecvf.com/images/CVPRLogo.png" width="300"/>
 
+---
+
+This repository contains the official implementation of **ManTraNet**, presented at CVPR 2019. The network predicts a pixel-wise forgery likelihood map from a single image.
+
+For detailed information please refer to the following citation:
+
+```text
+@inproceedings{Wu2019ManTraNet,
+    title={ManTra-Net: Manipulation Tracing Network For Detection And Localization of Image ForgeriesWith Anomalous Features},
+    author={Yue Wu, Wael AbdAlmageed, and Premkumar Natarajan},
+    journal={The IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+    year={2019}
+}
 ```
-  @inproceedings{Wu2019ManTraNet,
-      title={ManTra-Net: Manipulation Tracing Network For Detection And Localization of Image ForgeriesWith Anomalous Features},
-      author={Yue Wu, Wael AbdAlmageed, and Premkumar Natarajan},
-      journal={The IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
-      year={2019}
-  }
-```
 
-***
+---
 
-# Overview
-ManTraNet is an end-to-end image forgery detection and localization solution, which means it takes a testing image as input, and predicts pixel-level forgery likelihood map as output. Comparing to existing methods, the proposed ManTraNet has the following advantages:
+## Overview
 
-  1. **Simplicity**: ManTraNet needs no extra pre- and/or post-processing
-  2. **Fast**: ManTraNet puts all computations in a single network, and accepts an image of arbitrary size. 
-  3. **Robustness**: ManTraNet does not rely on working assumptions other than *the local manipulation assumption*, i.e. some region in a testing image is modified differently from the rest. 
+ManTraNet is an end-to-end solution for image forgery detection and localization. It takes an image of arbitrary size as input and outputs a forgery heat map. The method offers:
 
-<img src="https://github.com/ISICV/ManTraNet/blob/master/data/result0.png" width="400"/> <img src="https://github.com/ISICV/ManTraNet/blob/master/data/result1.png" width="400"/> 
+1. **Simplicity** – no additional pre/post processing is required;
+2. **Speed** – the entire computation is performed by a single network;
+3. **Robustness** – it relies only on the assumption that a region in the image is manipulated differently from the rest.
 
-Technically speaking, ManTraNet is composed of two sub-networks as shown below:
-  1. Image Manipulation Trace Feature Extractor: the feature extraction network for the image manipulation classification task, which is sensitive to different manipulation types, and encodes the image manipulation in a patch into a fixed dimension feature vector.
-  2. Local Anomaly Detection Network: the anomaly detection network to compare a local feature against the dominant feature averaged from a local region, whose activation depends on how far a local feature deviates from the reference feature instead of the absolute value of a local feature.  
+![Sample results](https://github.com/ISICV/ManTraNet/blob/master/data/result0.png) ![Sample results](https://github.com/ISICV/ManTraNet/blob/master/data/result1.png)
 
-![ManTraNet](https://github.com/ISICV/ManTraNet/blob/master/data/ManTraNet-overview.png)
+### Architecture
 
-# Extension
-ManTraNet is pretrained with all synthetic data. To prevent overfitting, we 
-1. Pretrain the Image Manipulation Classification ([385 classes](https://github.com/ISICV/ManTraNet/blob/master/data/IMC385.png)) task to obtain the Image *Manipulation Trace Feature Extractor*
-2. Train ManTraNet with four types of synthetic data, i.e. copy-move, splicing, removal, and enhancement
+The network is composed of two main blocks:
 
-To extend the provided ManTraNet, one may introduce the new manipulation either to the IMC pretrain task, or to the end-to-end ManTraNet task, or both. It is also worth noting that the IMC task can be a **self-supervised** task. 
+1. **Image Manipulation Trace Feature Extractor** – trained on an image manipulation classification task and sensitive to various editing operations. It produces a fixed-length feature vector for each patch.
+2. **Local Anomaly Detection Network** – compares a local feature to the dominant feature averaged from its neighborhood and activates based on the deviation rather than the absolute value.
 
-# Dependency
-ManTraNet is written in Keras with the TensorFlow backend.
+![Architecture](https://github.com/ISICV/ManTraNet/blob/master/data/ManTraNet-overview.png)
 
-Tested versions:
+### Extending the model
 
-  - **Python**: 3.12
-  - **Keras**: 3.10
-  - **TensorFlow**: 2.16.1
+The released weights are pretrained entirely on synthetic data:
 
-Earlier versions might still work but are no longer maintained here.
+1. Pretrain the Image Manipulation Classification task over [385 classes](https://github.com/ISICV/ManTraNet/blob/master/data/IMC385.png).
+2. Train ManTraNet end-to-end on copy-move, splicing, removal and enhancement forgeries.
 
-To convert the released weights to ONNX run:
+New manipulation types can be introduced at either stage. The IMC task can also be treated as a **self-supervised** learning problem.
+
+## Requirements
+
+The code is written for Keras on top of TensorFlow. Tested versions are:
+
+- **Python** 3.12
+- **Keras** 3.10
+- **TensorFlow** 2.16.1
+
+Earlier versions may still work but are no longer maintained.
+
+## Converting to ONNX
+
+Install the required packages and run the conversion script:
 
 ```bash
 pip install tensorflow==2.16.1 keras==3.10.0 tf2onnx
 python convert_to_onnx.py
 ```
 
-## ONNX testing
+This loads `pretrained_weights/ManTraNet_Ptrain4.h5` and produces `pretrained_weights/ManTraNet_Ptrain4.onnx`.
 
-After conversion you can test the exported model with a few sample
-images:
+## Testing the ONNX model
+
+After conversion you can verify the exported model on a few sample images:
 
 ```bash
 pip install onnxruntime opencv-python-headless
 python test_onnx.py
 ```
 
-The script reports the mean score for forged and original images and
-also prints how long each inference took. Example output:
-
-```
-Mean forged score: 0.135067
-Mean original score: 0.054929
-Image 1 forged time: 2.0999s, original time: 1.9482s
-Image 2 forged time: 1.8609s, original time: 1.8908s
-Image 3 forged time: 1.8984s, original time: 1.9349s
-```
+The script prints the mean score for forged and original examples and reports the inference time for each image.
 
 ## .NET CLI
 
-You can also run the ONNX model using a small .NET 8 command line
-application located in the `ManTraNetCLI` directory. Build and execute
-it with:
+The `ManTraNetCLI` directory contains a small .NET 8 command line program. After building it with:
 
 ```bash
 dotnet run -c Release --project ManTraNetCLI
 ```
 
-The program loads `pretrained_weights/ManTraNet_Ptrain4.onnx` and runs
-inference on a few sample pairs defined in `data/samplePairs.csv`, then
-prints the mean forged and original scores.
+the program loads `pretrained_weights/ManTraNet_Ptrain4.onnx` and runs inference on the sample pairs listed in `data/samplePairs.csv`.
 
-# Demo
-One may simply download the repo and play with the provided ipython notebook. 
+## Demo
 
-Alternatively, one may play with the inference code using [this google colab link](https://colab.research.google.com/drive/1ai4kVlI6w9rREqqYnTfpk3gM3YX9k-Ek).
+You can explore ManTraNet interactively using the supplied Jupyter notebook or via [Google Colab](https://colab.research.google.com/drive/1ai4kVlI6w9rREqqYnTfpk3gM3YX9k-Ek).
 
-# Contact
-For any paper related questions, please contact `rex.yue.wu(AT)gmail.com`
+## Contact
 
-# Licence
-The Software is made available for academic or non-commercial purposes only. The license is for a copy of the program for an unlimited term. Individuals requesting a license for commercial use must pay for a commercial license.
+For paper related questions please contact **rex.yue.wu(AT)gmail.com**.
 
-    USC Stevens Institute for Innovation 
-    University of Southern California 
-    1150 S. Olive Street, Suite 2300 
-    Los Angeles, CA 90115, USA 
-    ATTN: Accounting 
-  
-DISCLAIMER. USC MAKES NO EXPRESS OR IMPLIED WARRANTIES, EITHER IN FACT OR BY OPERATION OF LAW, BY STATUTE OR OTHERWISE, AND USC SPECIFICALLY AND EXPRESSLY DISCLAIMS ANY EXPRESS OR IMPLIED WARRANTY OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, VALIDITY OF THE SOFTWARE OR ANY OTHER INTELLECTUAL PROPERTY RIGHTS OR NON-INFRINGEMENT OF THE INTELLECTUAL PROPERTY OR OTHER RIGHTS OF ANY THIRD PARTY. SOFTWARE IS MADE AVAILABLE AS-IS. LIMITATION OF LIABILITY. TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL USC BE LIABLE TO ANY USER OF THIS CODE FOR ANY INCIDENTAL, CONSEQUENTIAL, EXEMPLARY OR PUNITIVE DAMAGES OF ANY KIND, LOST GOODWILL, LOST PROFITS, LOST BUSINESS AND/OR ANY INDIRECT ECONOMIC DAMAGES WHATSOEVER, REGARDLESS OF WHETHER SUCH DAMAGES ARISE FROM CLAIMS BASED UPON CONTRACT, NEGLIGENCE, TORT (INCLUDING STRICT LIABILITY OR OTHER LEGAL THEORY), A BREACH OF ANY WARRANTY OR TERM OF THIS AGREEMENT, AND REGARDLESS OF WHETHER USC WAS ADVISED OR HAD REASON TO KNOW OF THE POSSIBILITY OF INCURRING SUCH DAMAGES IN ADVANCE.
+## License
 
-For commercial license pricing and annual commercial update and support pricing, please contact:
+The software is provided for academic or non-commercial purposes only. Individuals seeking a commercial license must contact USC Stevens Institute for Innovation.
 
-    Rakesh Pandit USC Stevens Institute for Innovation 
-    University of Southern California 
-    1150 S. Olive Street, Suite 2300
-    Los Angeles, CA 90115, USA 
+```
+USC Stevens Institute for Innovation
+University of Southern California
+1150 S. Olive Street, Suite 2300
+Los Angeles, CA 90115, USA
+ATTN: Accounting
+```
 
-    Tel: +1 213-821-3552
-    Fax: +1 213-821-5001 
-    Email: rakeshvp@usc.edu and ccto: accounting@stevens.usc.edu
+DISCLAIMER. USC MAKES NO EXPRESS OR IMPLIED WARRANTIES, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. THE SOFTWARE IS PROVIDED "AS IS" AND USC SHALL NOT BE LIABLE FOR ANY INCIDENTAL OR CONSEQUENTIAL DAMAGES.
 
-----------------
-# IMPORTANT NOTICE
-First I want to thank you all for using this repo. I've received several emails every month regarding to different issues. Two important questions are listed below:
+For commercial license pricing and support please contact:
 
-1. Can you release the training code, training dataset, and/or testing code?
+```
+Rakesh Pandit
+USC Stevens Institute for Innovation
+University of Southern California
+1150 S. Olive Street, Suite 2300
+Los Angeles, CA 90115, USA
+Tel: +1 213-821-3552
+Fax: +1 213-821-5001
+Email: rakeshvp@usc.edu (cc: accounting@stevens.usc.edu)
+```
 
-No, I can't. For training code or commerial usage, you should contact the USC ISI. For training dataset, I think it should be straightforward to create your own version. For testing code, the inference part has already been included in the repo; the evaluation part has not been included yet, but I can work on it in future.
+---
 
-2. Why the released pretrained model is of a different architecture from the one described in the paper?
+## Important Notice
 
-I highly appreciated zhang.y\*\*\*\*'s email which pointed out that the released pretrained model's first block has 32 filters instead of 16 (i.e. the IMC-VGG-W&D setting described in paper Table 5). I confirmed this is a mistake, possibly because I failed to name models with different architectures differently or simply picked a wrong model. However, I have already left the USC ISI for years, and thus don't have the resources to correct this mistake. I deeply apologize for any inconvience, but I hope you guys could understand. This mistake might also explain why some of you (who tried to reproduce the evaluation results) observed slightly different performance scores than those reported in paper, but it will not affect any main contributions/conclusions made in the paper.
-
-
-
-
-
-
-
-
-
-
-
+1. **Training code, datasets and evaluation scripts are not released**. For training code or commercial usage please contact USC ISI. The released repository contains only the inference code.
+2. **Pretrained architecture difference**. The model provided here uses 32 filters in the first block (IMC-VGG-W&D setting from Table 5 of the paper). This differs from the architecture described in the paper, which may lead to slightly different evaluation numbers.
